@@ -1,0 +1,50 @@
+digraph ASAPlus {
+  rankdir=LR;
+  node [shape=box, style="rounded,filled", fillcolor="#f6f8fa", fontname="Arial"];
+
+  subgraph cluster_s0 {
+    label="阶段0：S0 知识框架构建（按章/节分块 + API-LMM 摘要）";
+    color="#d0d7de";
+
+    books [label="data/books/*.txt\n(书籍原文)"];
+    parser [label="BookParser\n(识别章/节/小节)"];
+    splitter [label="Split & Index\n(按 node_id 切分原文)\ncontent_index.json"];
+    s0summ [label="LLM(API) Summarize\n(逐章/逐节梳理)\n输出 S0"];
+    s0out [label="s0_knowledge.json\n(S0 知识框架)"];
+    books -> parser -> splitter -> s0summ -> s0out;
+  }
+
+  subgraph cluster_q {
+    label="阶段1..n：Q0 多层分类 S1..Sn + 原文推理（API-LMM）";
+    color="#d0d7de";
+
+    q0 [label="用户问题 Q0"];
+    s0 [label="S0 Outline\n(章节/小节标题列表)"];
+    classify [label="LLM(API) 分类\nQ0 + S0 -> S1"];
+    fetch [label="根据 S_k 选中 node_id\n读取对应原文(全部)"];
+    evidence [label="原文逐块发送给 LLM\n提取证据 Notes"];
+    integrate [label="LLM(API) 综合推理\n判定能否解决 Q0\n不能则输出 refine 方向"];
+    refine [label="LLM(API) 再分类\nS_k + Q0 + S0 -> S_{k+1}"];
+    endplan [label="得到 Sn + 完整解题思路\n(含引用书籍章节)"];
+
+    q0 -> classify;
+    s0 -> classify;
+    classify -> fetch -> evidence -> integrate;
+    integrate -> endplan [label="can_solve=true"];
+    integrate -> refine [label="can_solve=false"];
+    refine -> fetch;
+  }
+
+  subgraph cluster_code {
+    label="阶段3：公式推导 + 代码生成 + 用户确认执行";
+    color="#d0d7de";
+
+    codegen [label="LLM(API) 生成\n推导 + Python代码\n(可扩展 LAMMPS/GROMACS)"];
+    approve [label="用户确认(必须)\nY 才执行"];
+    exec [label="执行器\nlocal / remote_ssh / remote_http"];
+    result [label="结果输出\nstdout/文件/图表"];
+    report [label="生成 Markdown 报告\n含引用与代码"];
+
+    endplan -> codegen -> approve -> exec -> result -> report;
+  }
+}

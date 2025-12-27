@@ -1,0 +1,149 @@
+# ============================
+# ASAPlus LookupBooks 配置文件
+# ============================
+# 说明：
+# - 本项目“所有大模型调用必须走 API”，不在本地部署任何大模型
+# - 你可以在本文件里切换默认使用的模型/供应商（例如默认用 qwen3-max）
+# - Windows 路径建议使用相对路径，便于未来迁移到 Linux 服务器
+
+project:
+  name: "ASAPlus-LookupBooks"
+  root_path: "."  # 一般无需修改；程序会自动定位包含 config/config.yaml 的项目根目录
+
+paths:
+  # 原始书籍 .txt（你由 .tex 转换而来）的目录
+  books_dir: "data/books"
+  # 解析与中间产物（S0、索引、split_books）的目录
+  processed_dir: "data/processed"
+  # LLM 调用缓存目录（可显著减少重复调用成本）
+  cache_dir: "data/cache"
+  # 输出目录（报告、生成代码等）
+  outputs_dir: "outputs"
+  generated_code_dir: "outputs/generated_code"
+  reports_dir: "outputs/reports"
+
+knowledge:
+  # S0 结果文件
+  s0_file: "data/processed/s0_knowledge.json"
+  # 用于“章节标题 -> 内容片段定位”的索引
+  content_index_file: "data/processed/content_index.json"
+  # 章节拆分后的原文存放目录（每本书一个子目录）
+  split_books_dir: "data/processed/split_books"
+
+  # 对哪些层级生成摘要：1=章，2=节，3=更细（如果解析器提供）
+  summary_levels: [1, 2]
+
+  # 单次摘要调用允许传入的最大字符数（过长会分块再做汇总）
+  max_chars_per_summary_call: 20000
+
+llm:
+  # 是否启用 LLM 调用缓存（建议 true）
+  use_cache: true
+  # 缓存 TTL（天）
+  cache_ttl_days: 365
+
+  # ★新增：全局默认 provider 优先级（当 routing.<task>.provider_priority 为空时使用）
+  # 你想“默认使用 qwen3-max”，通常就把 qwen 放在第一位
+  default_provider_priority: ["qwen", "openai", "deepseek"]
+
+  # 各 provider 的 API 配置与“角色 -> 模型名”映射
+  # 注意：API Key 不写在这里，统一写到 .env，通过 api_key_env 指定环境变量名
+  providers:
+    openai:
+      type: "openai"
+      api_key_env: "OPENAI_API_KEY"
+      # 如需自定义 OpenAI Base URL（代理/网关），在 .env 里设置 OPENAI_BASE_URL
+      base_url_env: "OPENAI_BASE_URL"
+      default_temperature: 0.1
+      default_max_tokens: 4096
+      timeout_s: 120
+      models:
+        outline: "gpt-4o"
+        reasoning: "gpt-4o"
+        coding: "gpt-4o"
+
+    qwen:
+      type: "dashscope"
+      api_key_env: "QWEN_API_KEY"
+      default_temperature: 0.1
+      default_max_tokens: 4096
+      timeout_s: 120
+      # 这里就是你要的“默认使用 qwen3-max”
+      models:
+        outline: "qwen3-max"
+        reasoning: "qwen3-max"
+        coding: "qwen3-max"
+
+    deepseek:
+      type: "openai_compatible"
+      api_key_env: "DEEPSEEK_API_KEY"
+      base_url_env: "DEEPSEEK_BASE_URL"
+      default_temperature: 0.1
+      default_max_tokens: 4096
+      timeout_s: 120
+      models:
+        outline: "deepseek-chat"
+        reasoning: "deepseek-reasoner"
+        coding: "deepseek-coder"
+
+  # task 级路由：允许为空（[]），表示使用 llm.default_provider_priority
+  # 如果你未来想“某个任务强制用 openai”，就在这里为该 task 指定 provider_priority
+  routing:
+    s0_outline:
+      provider_priority: []
+    decomposition:
+      provider_priority: []
+    content_evidence:
+      provider_priority: []
+    integration:
+      provider_priority: []
+    coding:
+      provider_priority: []
+
+agent:
+  # 递归分解最大深度（S1..Sn）
+  max_depth: 6
+  # 每轮最多选择多少个相关章节/节点进入下一步
+  max_selected_nodes: 8
+  # 每轮最多生成多少个子问题
+  max_subquestions: 8
+  # 置信度达到该阈值时可停止继续分解
+  stop_if_confidence_ge: 0.85
+
+  # 章节内容切片参数（用于把“选中章节的全部内容”切成可控长度）
+  chunk_size_chars: 12000
+  chunk_overlap_chars: 400
+  # 单个章节节点最多允许切多少块
+  max_chunks_per_node: 200
+
+  # 若一次需要喂给大模型的总 chunks 数超过该阈值，则强制要求用户确认
+  require_user_confirm_if_total_chunks_ge: 80
+
+execution:
+  # 运行模式：local=本机执行；remote_ssh=SSH 远程执行；remote_http=HTTP 远程执行
+  mode: "local"
+
+  local:
+    python_bin: "python"
+    workdir: "outputs/runtime"
+
+  # 你计划未来迁移到 Linux 服务器：这里预留 SSH 配置
+  # 使用时把 mode 改成 remote_ssh 并填写 host/username 等
+  remote_ssh:
+    host: "YOUR_SERVER_HOST"      # ← 需要你修改
+    port: 22
+    username: "YOUR_USERNAME"     # ← 需要你修改
+    password: ""                  # ← 建议留空，优先用 key_path
+    key_path: ""                  # ← 需要你修改（例如 ~/.ssh/id_rsa）
+    workdir: "/tmp/asa_plus_runtime"
+    python_bin: "python3"
+
+  # 预留 HTTP 远程执行（server/app.py）
+  remote_http:
+    endpoint: "http://YOUR_SERVER/api/run"   # ← 需要你修改
+    token: ""                                # ← 可选：服务端鉴权 token
+
+report:
+  include_full_code_in_report: true
+  include_evidence_notes: true
+  max_evidence_chars_per_note: 1200
